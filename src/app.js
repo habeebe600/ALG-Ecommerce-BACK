@@ -6,7 +6,9 @@ import { PrismaClient } from "@prisma/client";
 import authRoutes from "./routes/auth.routes.js";
 import profileRoutes from "./routes/profile.routes.js";
 import addressRoutes from "./routes/address.routes.js";
-
+import productRoutes from "./routes/product.routes.js";
+import categoryRoutes from "./routes/category.routes.js";
+import brandRoutes from "./routes/brand.routes.js";
 const app = express();
 const prisma = new PrismaClient();
 
@@ -18,6 +20,9 @@ app.use(express.json());
 app.use("/api/auth", authRoutes);
 app.use("/api/profile", profileRoutes);
 app.use("/api/address", addressRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/categories", categoryRoutes);
+app.use("/api/brands", brandRoutes);
 
 // Health Check
 app.get("/", async (req, res) => {

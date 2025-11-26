@@ -110,6 +110,43 @@ export const updateAddress = async (req, res) => {
     }
 };
 
+// SET DEFAULT ADDRESS
+export const setDefaultAddress = async (req, res) => {
+    try {
+        const userId = req.user.userId;
+        const { id } = req.params;
+
+        const exists = await prisma.address.findFirst({
+            where: { id, userId }
+        });
+
+        if (!exists) {
+            return res.status(404).json({ message: "Address not found" });
+        }
+
+        // Remove default from all addresses
+        await prisma.address.updateMany({
+            where: { userId },
+            data: { isDefault: false }
+        });
+
+        // Set selected address as default
+        const updated = await prisma.address.update({
+            where: { id },
+            data: { isDefault: true }
+        });
+
+        return res.json({
+            message: "Default address updated successfully",
+            address: updated
+        });
+
+    } catch (err) {
+        console.error("SET DEFAULT ADDRESS ERROR:", err);
+        res.status(500).json({ message: "Server error" });
+    }
+};
+
 
 // DELETE ADDRESS
 export const deleteAddress = async (req, res) => {
