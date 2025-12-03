@@ -191,22 +191,23 @@ export const updateStock = async (req, res) => {
 export const uploadProductImages = async (req, res) => {
   try {
     const { id } = req.params;
-    const { images } = req.body;
 
-    if (!images || !Array.isArray(images)) {
-      return res.status(400).json({ message: "Images array is required" });
+    // ✅ FILES COME FROM req.files — NOT req.body
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "No images uploaded" });
     }
 
-    const data = images.map((url) => ({
-      productId: id,
-      imageUrl: url
-    }));
+    const imageRecords = await prisma.productImage.createMany({
+      data: req.files.map(file => ({
+        imageUrl: `/uploads/${file.filename}`,
+        productId: id
+      }))
+    });
 
-    await prisma.productImage.createMany({ data });
-
-    res.json({ message: "Product images uploaded successfully" });
-  } catch (err) {
-    console.error("UPLOAD IMAGE ERROR:", err);
-    res.status(500).json({ message: "Failed to upload images" });
+    res.json({ message: "Images uploaded successfully", imageRecords });
+  } catch (error) {
+    console.error("UPLOAD IMAGE ERROR:", error);
+    res.status(500).json({ message: "Failed to upload image" });
   }
 };
+

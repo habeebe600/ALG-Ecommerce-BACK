@@ -15,6 +15,11 @@ model User {
   profile      Profile?
   phone        String?
   addresses    Address[]
+  carts        Cart[]
+  orders       Order[]
+  wishlists    Wishlist[]
+  orderReturns OrderReturn[]
+  reviews      Review[]
   isVerified   Boolean   @default(false)
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -28,7 +33,7 @@ model PasswordHistory {
   passwordHash String
   createdAt    DateTime @default(now())
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Profile {
@@ -36,10 +41,10 @@ model Profile {
   userId    String   @unique
   firstName String
   lastName  String
-  avatar    String?  // optional profile picture
+  avatar    String? // optional profile picture
   updatedAt DateTime @updatedAt
 
-  user      User     @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 }
 
 model Address {
@@ -55,63 +60,203 @@ model Address {
   isDefault Boolean  @default(false)
   updatedAt DateTime @updatedAt
 
-
-  user      User     @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 }
 
 model ProductCategory {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  slug      String    @unique
-  products  Product[]
+  id       String    @id @default(uuid())
+  name     String    @unique
+  slug     String    @unique
+  products Product[]
 
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 }
 
 model Brand {
-  id        String    @id @default(uuid())
-  name      String    @unique
-  products  Product[]
+  id       String    @id @default(uuid())
+  name     String    @unique
+  products Product[]
 
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
 }
 
 model Product {
-  id          String          @id @default(uuid())
+  id          String  @id @default(uuid())
   name        String
-  slug        String          @unique
+  slug        String  @unique
   description String
   price       Float
-  salePrice  Float?
-  rating     Float           @default(0)
-  isActive   Boolean         @default(true)
+  salePrice   Float?
+  rating      Float   @default(0)
+  isActive    Boolean @default(true)
+  wishlistItems WishlistItem[]
 
   categoryId String
   brandId    String?
 
-  category   ProductCategory @relation(fields: [categoryId], references: [id])
-  brand      Brand?          @relation(fields: [brandId], references: [id])
+  category ProductCategory @relation(fields: [categoryId], references: [id])
+  brand    Brand?          @relation(fields: [brandId], references: [id])
 
-  images     ProductImage[]
-  inventory  Inventory?
+  images    ProductImage[]
+  inventory Inventory?
 
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+  reviews    Review[]
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model ProductImage {
-  id        String   @id @default(uuid())
-  imageUrl String
+  id        String @id @default(uuid())
+  imageUrl  String
   productId String
 
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 }
 
 model Inventory {
-  id        String   @id @default(uuid())
-  productId String   @unique
-  stock     Int      @default(0)
-  lowStock  Int      @default(5)
+  id        String @id @default(uuid())
+  productId String @unique
+  stock     Int    @default(0)
+  lowStock  Int    @default(5)
 
-  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+}
+
+model Cart {
+  id        String     @id @default(uuid())
+  userId    String? // null = guest cart (optional)
+  sessionId String? // optional, for guest carts (client side cookie)
+  items     CartItem[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  user User? @relation(fields: [userId], references: [id])
+}
+
+model CartItem {
+  id        String   @id @default(uuid())
+  cartId    String
+  productId String
+  quantity  Int      @default(1)
+  price     Float // snapshot unit price when added
+  createdAt DateTime @default(now())
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Wishlist {
+  id        String         @id @default(uuid())
+  userId    String
+  items     WishlistItem[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model WishlistItem {
+  id        String   @id @default(uuid())
+  wishlistId String
+  productId  String
+  createdAt DateTime @default(now())
+
+  wishlist Wishlist @relation(fields: [wishlistId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id])
+
+  @@unique([wishlistId, productId]) // ✅ Prevent duplicates
+}
+
+
+model Coupon {
+  id            String   @id @default(uuid())
+  code          String   @unique
+  discountType  String   // "percentage" or "fixed"
+  discountValue Float
+  minOrderValue Float?
+  maxDiscount   Float?
+  expiresAt     DateTime?
+  usageLimit    Int?
+  usedCount     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  orders Order[]
+}
+
+model Order {
+  id                String   @id @default(uuid())
+  userId            String?
+  totalAmount       Float
+  finalAmount       Float?
+  status            String   @default("pending") // pending, confirmed, processing, shipped, delivered, cancelled
+  paymentStatus     String   @default("unpaid") // unpaid, paid, failed, refunded
+  shippingAddressId String? // optional - reference to Address.id, but kept simple as string if you prefer
+  isReplacement     Boolean  @default(false)
+  couponId          String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+coupon Coupon? @relation(fields: [couponId], references: [id])
+  items   OrderItem[]
+  user    User?       @relation(fields: [userId], references: [id])
+  payment Payment?
+  returns OrderReturn[]
+}
+
+model OrderItem {
+  id        String @id @default(uuid())
+  orderId   String
+  productId String
+  quantity  Int
+  unitPrice Float
+  subtotal  Float
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id                String   @id @default(uuid())
+  orderId           String   @unique
+  provider          String // stripe / razorpay / offline
+  providerPaymentId String?
+  amount            Float
+  status            String   @default("pending") // pending, succeeded, failed, refunded
+  createdAt         DateTime @default(now())
+
+  order Order @relation(fields: [orderId], references: [id])
+}
+
+model OrderReturn {
+  id          String   @id @default(uuid())
+  orderId     String
+  userId      String
+  reason      String
+  status      String   @default("pending") 
+  // pending, approved, rejected, refunded
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id])
+  user  User  @relation(fields: [userId], references: [id])
+}
+
+model Review {
+  id        String   @id @default(uuid())
+  userId    String
+  productId String
+  rating    Int
+  comment   String?
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, productId]) //  Prevent duplicate reviews
 }
