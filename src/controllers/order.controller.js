@@ -1,10 +1,13 @@
 import prisma from "../../prisma/prismaClient.js";
+import { sendNotification } from "../utils/notification.service.js";
+import { deductStock } from "../services/inventory.service.js";
+import { restockProduct } from "../services/inventory.service.js";
 
 /** Create Order from cart */
 export const createOrder = async (req, res) => {
   try {
     const userId = req.user.userId;
-const { shippingAddressId, couponId } = req.body;    
+    const { shippingAddressId, couponId } = req.body;
 
     // 1️⃣ Find user's cart
     const cart = await prisma.cart.findFirst({
@@ -22,68 +25,92 @@ const { shippingAddressId, couponId } = req.body;
 
     // 2️⃣ Calculate total
     let totalAmount = 0;
-cart.items.forEach((item) => {
-  totalAmount += item.price * item.quantity;
-});
+    cart.items.forEach((item) => {
+      totalAmount += item.price * item.quantity;
+    });
 
-let finalAmount = totalAmount;
-let appliedCoupon = null;
+    let finalAmount = totalAmount;
+    let appliedCoupon = null;
 
-if (couponId) {
-  appliedCoupon = await prisma.coupon.findUnique({
-    where: { id: couponId }
-  });
+    if (couponId) {
+      appliedCoupon = await prisma.coupon.findUnique({
+        where: { id: couponId }
+      });
 
-  if (!appliedCoupon || !appliedCoupon.isActive)
-    return res.status(400).json({ message: "Invalid coupon" });
+      if (!appliedCoupon || !appliedCoupon.isActive)
+        return res.status(400).json({ message: "Invalid coupon" });
 
-  let discount =
-    appliedCoupon.discountType === "percentage"
-      ? (totalAmount * appliedCoupon.discountValue) / 100
-      : appliedCoupon.discountValue;
+      let discount =
+        appliedCoupon.discountType === "percentage"
+          ? (totalAmount * appliedCoupon.discountValue) / 100
+          : appliedCoupon.discountValue;
 
-  if (appliedCoupon.maxDiscount)
-    discount = Math.min(discount, appliedCoupon.maxDiscount);
+      if (appliedCoupon.maxDiscount)
+        discount = Math.min(discount, appliedCoupon.maxDiscount);
 
-  finalAmount -= discount;
+      finalAmount -= discount;
 
-  await prisma.coupon.update({
-    where: { id: couponId },
-    data: { usedCount: { increment: 1 } }
-  });
-}
-
-    // 3️⃣ Create order
-   const order = await prisma.order.create({
-  data: {
-    userId,
-    totalAmount,
-    finalAmount,
-    couponId,
-    shippingAddressId,
-    items: {
-      create: cart.items.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice: item.price,
-        subtotal: item.price * item.quantity,
-      })),
-    },
-  },
-});
-
-
-    // 4️⃣ Reduce inventory stock
-    for (const item of cart.items) {
-      await prisma.inventory.update({
-        where: { productId: item.productId },
-        data: { stock: { decrement: item.quantity } },
+      await prisma.coupon.update({
+        where: { id: couponId },
+        data: { usedCount: { increment: 1 } }
       });
     }
+
+    // 3️⃣ Create order
+    const order = await prisma.order.create({
+      data: {
+        userId,
+        totalAmount,
+        finalAmount,
+        couponId,
+        shippingAddressId,
+        items: {
+          create: cart.items.map((item) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            unitPrice: item.price,
+            subtotal: item.price * item.quantity,
+          })),
+        },
+      },
+    });
+
+    // 4️⃣ Deduct inventory using service
+await deductStock(
+  cart.items.map(i => ({
+    productId: i.productId,
+    quantity: i.quantity
+  }))
+);
+
 
     // 5️⃣ Clear cart after order
     await prisma.cartItem.deleteMany({
       where: { cartId: cart.id },
+    });
+    
+    await prisma.orderTracking.create({
+      data: {
+        orderId: order.id,
+        status: "pending",
+        message: "Order placed successfully"
+      }
+    });
+    //  notification After order created 
+    const fullOrder = await prisma.order.findUnique({
+      where: { id: order.id },
+      include: {
+        items: { include: { product: true } }
+      }
+    });
+    
+    const { generateOrderEmail } = await import("../utils/orderEmailTemplate.js");
+
+    await sendNotification({
+      userId: order.userId,
+      referenceId: order.id,
+      message: generateOrderEmail(fullOrder, "Your order has been placed successfully"),
+      sendEmailAlso: true
     });
 
     res.status(201).json({
@@ -94,7 +121,9 @@ if (couponId) {
     console.error("CREATE ORDER ERROR:", error);
     res.status(500).json({ message: "Failed to place order" });
   }
+
 };
+
 
 
 /** Get user orders */
@@ -142,6 +171,51 @@ export const updateOrderStatus = async (req, res) => {
       data: { status }
     });
 
+    await prisma.orderTracking.create({
+  data: {
+    orderId: updated.id,
+    status,
+    message: `Order marked as ${status}`
+  }
+});
+
+
+    // ✅ SHIPPED NOTIFICATION
+    if (status === "shipped") {
+      const fullOrder = await prisma.order.findUnique({
+        where: { id },
+        include: { items: { include: { product: true } } }
+      });
+
+      const { generateOrderEmail } = await import("../utils/orderEmailTemplate.js");
+
+      await sendNotification({
+        userId: updated.userId,
+        referenceId: updated.id,
+        message: generateOrderEmail(fullOrder, "Your order has been shipped"),
+        sendEmailAlso: true
+      });
+    }
+
+
+    // ✅ DELIVERED NOTIFICATION
+    if (status === "delivered") {
+      const fullOrder = await prisma.order.findUnique({
+        where: { id },
+        include: { items: { include: { product: true } } }
+      });
+
+      const { generateOrderEmail } = await import("../utils/orderEmailTemplate.js");
+
+      await sendNotification({
+        userId: updated.userId,
+        referenceId: updated.id,
+        message: generateOrderEmail(fullOrder, "Your order has been delivered successfully"),
+        sendEmailAlso: true
+      });
+    }
+
+
     return res.json({ message: "Order status updated", order: updated });
   } catch (err) {
     console.error("UPDATE ORDER STATUS ERROR:", err);
@@ -164,13 +238,36 @@ export const cancelOrder = async (req, res) => {
       data: { status: "cancelled", paymentStatus: order.paymentStatus === "paid" ? "refunded" : order.paymentStatus }
     });
 
+    await prisma.orderTracking.create({
+  data: {
+    orderId: updated.id,
+    status: "cancelled",
+    message: "Order cancelled by customer"
+  }
+});
+
+    // SEND NOTIFICATION on order cancel
+    const fullOrder = await prisma.order.findUnique({
+      where: { id },
+      include: { items: { include: { product: true } } }
+    });
+
+    const { generateOrderEmail } = await import("../utils/orderEmailTemplate.js");
+
+    await sendNotification({
+      userId: order.userId,
+      referenceId: order.id,
+      message: generateOrderEmail(fullOrder, "Your order has been cancelled"),
+      sendEmailAlso: true
+    });
+
+
     // OPTIONAL: restore stock if you reduced on order creation
-    for (const it of await prisma.orderItem.findMany({ where: { orderId: id } })) {
-      await prisma.inventory.update({
-        where: { productId: it.productId },
-        data: { stock: { increment: it.quantity } }
-      });
-    }
+   const items = await prisma.orderItem.findMany({ where: { orderId: id } });
+
+for (const it of items) {
+  await restockProduct(it.productId, it.quantity);
+}
 
     return res.json({ message: "Order cancelled", order: updated });
   } catch (err) {

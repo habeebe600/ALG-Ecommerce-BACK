@@ -1,4 +1,6 @@
 import prisma from "../../prisma/prismaClient.js";
+import { sendNotification } from "../utils/notification.service.js";
+import { restockProduct } from "../services/inventory.service.js";
 
 /** ✅ USER: Request Return */
 export const requestReturn = async (req, res) => {
@@ -35,6 +37,27 @@ export const requestReturn = async (req, res) => {
     const newReturn = await prisma.orderReturn.create({
       data: { orderId, userId, reason }
     });
+
+    // ✅ Notify user: Return request submitted
+const fullOrder = await prisma.order.findUnique({
+  where: { id: orderId },
+  include: { items: { include: { product: true } } }
+});
+
+const { generateReturnEmail } = await import("../utils/orderEmailTemplate.js");
+
+await sendNotification({
+  userId,
+  referenceId: orderId,
+  message: generateReturnEmail(
+    fullOrder,
+    "Your return request has been submitted",
+    reason
+  ),
+  sendEmailAlso: true
+});
+
+
 
     return res.status(201).json({
       message: "Return request submitted",
@@ -99,17 +122,55 @@ export const updateReturnStatus = async (req, res) => {
       data: { status }
     });
 
+    await prisma.orderTracking.create({
+  data: {
+    orderId: ret.orderId,
+    status: "return-approved",
+    message: "Return request approved"
+  }
+});
+
+    // ✅ Send notification based on return status
+const fullOrder = await prisma.order.findUnique({
+  where: { id: ret.orderId },
+  include: { items: { include: { product: true } } }
+});
+
+const { generateReturnEmail } = await import("../utils/orderEmailTemplate.js");
+
+let title = "";
+
+if (status === "approved") {
+  title = "✅ Your return request has been approved";
+}
+
+if (status === "rejected") {
+  title = "❌ Your return request has been rejected";
+}
+
+if (status === "refunded") {
+  title = "💰 Your refund has been completed";
+}
+
+if (title) {
+  await sendNotification({
+    userId: ret.userId,
+    referenceId: ret.orderId,
+    message: generateReturnEmail(fullOrder, title),
+    sendEmailAlso: true
+  });
+}
+
+
+
     // ✅ RESTORE STOCK AFTER APPROVAL
-    if (status === "approved") {
+     if (status === "approved") {
       const items = await prisma.orderItem.findMany({
         where: { orderId: ret.orderId }
       });
 
-      for (const item of items) {
-        await prisma.inventory.update({
-          where: { productId: item.productId },
-          data: { stock: { increment: item.quantity } }
-        });
+      for (const it of items) {
+        await restockProduct(it.productId, it.quantity);
       }
     }
 
@@ -184,6 +245,33 @@ if (existingReplacement) {
       where: { id: returnId },
       data: { status: "refunded" }
     });
+
+    await prisma.orderTracking.create({
+  data: {
+    orderId: newOrder.id,
+    status: "replacement-created",
+    message: "Replacement order created"
+  }
+});
+
+    /* notification After replacement created */
+const fullReplacementOrder = await prisma.order.findUnique({
+  where: { id: newOrder.id },
+  include: { items: { include: { product: true } } }
+});
+
+const { generateOrderEmail } = await import("../utils/orderEmailTemplate.js");
+
+await sendNotification({
+  userId: ret.userId,
+  referenceId: newOrder.id,
+  message: generateOrderEmail(
+    fullReplacementOrder,
+    "🔁 Your replacement order has been created successfully"
+  ),
+  sendEmailAlso: true
+});
+
 
     return res.json({
       message: "Replacement order created",

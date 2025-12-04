@@ -43,11 +43,12 @@ export const register = async (req, res) => {
     const code = generateOTP();
     saveOTP(email, code);
 
-    await sendEmail(
-      email,
-      "Verify your Account",
-      `<p>Your OTP is: <b>${code}</b> (valid for 5 minutes)</p>`
-    );
+    await sendEmail({
+  to: email,
+  subject: "Verify your Account",
+  html: `<p>Your OTP is: <b>${code}</b> (valid for 5 minutes)</p>`
+});
+
 
     return res.status(201).json({
       message: "Registration successful! Please verify your email using the OTP sent.",
@@ -105,11 +106,12 @@ export const resendVerification = async (req, res) => {
     const code = generateOTP();
     saveOTP(email, code);
 
-    await sendEmail(
-      email,
-      "Verify your Account - New OTP",
-      `<p>Your new OTP is: <b>${code}</b> (valid for 5 minutes)</p>`
-    );
+    await sendEmail({
+  to: email,
+  subject: "Verify your Account - New OTP",
+  html: `<p>Your new OTP is: <b>${code}</b> (valid for 5 minutes)</p>`
+});
+
 
     return res.json({ message: "New OTP sent successfully!" });
 
@@ -178,11 +180,12 @@ export const forgotPassword = async (req, res) => {
     const code = generateOTP();
     saveOTP(email, code);
 
-    await sendEmail(
-      email,
-      "Password Reset OTP",
-      `<p>Your OTP is: <b>${code}</b> (valid for 5 minutes)</p>`
-    );
+    await sendEmail({
+  to: email,
+  subject: "Password Reset OTP",
+  html: `<p>Your OTP is: <b>${code}</b> (valid for 5 minutes)</p>`
+});
+
 
     res.json({ message: "OTP sent for password reset" });
   } catch (err) {
